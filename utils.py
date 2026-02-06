@@ -7,6 +7,10 @@ from matplotlib.backend_bases import MouseButton
 import random
 import astar
 from astar import astar_search_3d
+from RRT_star import rrt_star_3d
+from astar_optimed_double import astar_search_3d_optimized_w
+from astar_optimized_single import astar_search_3d_optimized
+import scipy
 # 设置中文字体支持
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
@@ -47,108 +51,64 @@ def create_3d_obstacles():
 def distanceFcn(p1, p2):
     return np.linalg.norm(np.array(p1) - np.array(p2))
 
-def astar_search_3d_optimized(start_xyz, target_xyz, space_map):
-    # 转换为元组提高处理速度和作为字典键
-    start = tuple(start_xyz)
-    target = tuple(target_xyz)
+import sys
+from scipy import interpolate
+
+def b_spline_optimization(path, n_points=200, degree=3, smoothing=2.0):
+    """
+    使用B样条对路径进行平滑优化
+    :param path: A*算法生成的原始路径点列表 [(x1,y1,z1), (x2,y2,z2), ...]
+    :param n_points: 插值生成的点数量，越多越平滑
+    :param degree: 样条阶数，k=3表示三次样条（常用）
+    :param smoothing: 平滑因子（s）。s=0表示必须经过所有原始点；s越大曲线越平滑但偏离原始点越远
+    :return: 优化后的平滑路径数组
+    ```python
+    """
+    if len(path) <= degree:
+        return np.array(path)
+
+    # 1. 数据预处理
+    path_arr = np.array(path)
     
-    # 地图边界
-    MAX_X, MAX_Y, MAX_Z = space_map.shape
+    # B样条要求输入点不能有重复点（A*路径有时会出现相邻重复点）
+    # 过滤掉连续重复的点
+    filtered_path = [path_arr[0]]
+    for i in range(1, len(path_arr)):
+        if not np.allclose(path_arr[i], path_arr[i-1]):
+            filtered_path.append(path_arr[i])
+    path_arr = np.array(filtered_path)
 
-    # 预计算26个方向的偏移量和距离，以存储空间来节省计算花费的时间
-    neighbors_offsets = []
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            for dz in [-1, 0, 1]:
-                if dx == 0 and dy == 0 and dz == 0:
-                    continue
-                # 计算到邻居的欧几里得距离作为移动代价
-                dist = np.sqrt(dx**2 + dy**2 + dz**2)
-                neighbors_offsets.append((dx, dy, dz, dist))
+    if len(path_arr) <= degree:
+        return path_arr
 
-    # 优先队列 [f_score, g_score, (x, y, z)]
-    # heapq 会根据第一个元素 f_score 自动排序
-    start_hn = np.linalg.norm(np.array(start) - np.array(target))
-    openset = [(start_hn, 0, start)]
+    # 2. 拟合 B-Spline
+    # x, y, z 分别为各轴坐标
+    x, y, z = path_arr[:, 0], path_arr[:, 1], path_arr[:, 2]
     
-    # 记录每个点是从哪个点来的 (用于回溯)
-    came_from = {}
-    
-    # 记录从起点到当前点的实际代价 g
-    g_score = {start: 0}
-    
-    # 记录是否已访问过 (Closed Set)
-    closed_set = set()
-
-    foundpath = 0
-    final_node = None
-
-    while openset:
-        # 1. 弹出 f 最小的节点 (O(log N))
-        current_f, current_g, current = heapq.heappop(openset)
-
-        if current == target:
-            foundpath = 1
-            final_node = current
-            break
-
-        if current in closed_set:
-            continue
+    # splprep 用于寻找多维空间的参数化曲线
+    # tck: 包含节点向量、系数、阶数的元组; u: 参数化后的值
+    try:
+        tck, u = interpolate.splprep([x, y, z], s=smoothing, k=degree)
         
-        closed_set.add(current)
-
-        # 2. 遍历邻居
-        cx, cy, cz = current
-        for dx, dy, dz, move_cost in neighbors_offsets:
-            nx, ny, nz = cx + dx, cy + dy, cz + dz
-            neighbor = (nx, ny, nz)
-
-            # 边界和障碍物检查
-            if 0 <= nx < MAX_X and 0 <= ny < MAX_Y and 0 <= nz < MAX_Z:
-                if space_map[nx, ny, nz] == 0: # 假设 0 是障碍物
-                    continue
-                
-                if neighbor in closed_set:
-                    continue
-
-                # 计算新的 g 值
-                tentative_g = current_g + move_cost
-
-                # 如果这个点没走过，或者找到了更短的路径
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    g_score[neighbor] = tentative_g
-                    # 启发式函数 h (使用欧几里得距离)
-                    h_score = np.sqrt((nx-target[0])**2 + (ny-target[1])**2 + (nz-target[2])**2)
-                    f_score = tentative_g + h_score
-                    
-                    came_from[neighbor] = current
-                    heapq.heappush(openset, (f_score, tentative_g, neighbor))
-
-    # 3. 路径回溯
-    path = []
-    if foundpath:
-        curr = final_node
-        while curr in came_from:
-            path.append(list(curr))
-            curr = came_from[curr]
-        path.append(list(start))
-        path.reverse() # A* 通常从终点往回找，所以要反转
-
-    return foundpath, path
-
-
+        # 3. 在 0 到 1 之间生成更密集的参数点来评估曲线
+        u_fine = np.linspace(0, 1, n_points)
+        new_points = interpolate.splev(u_fine, tck)
+        
+        return np.array(new_points).T
+    except Exception as e:
+        print(f"样条拟合失败: {e}")
+        return path_arr
+# 增加递归深度，防止3D长距离跳跃时溢出
 
 
 # 可视化三维空间和路径
 def visualize_3d_path(start_xyz, target_xyz, path, space_map):
     fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    
+    ax = fig.add_subplot(111, projection='3d') 
     # 绘制障碍物
     obstacle_positions = np.where(space_map == 0)
     ax.scatter(obstacle_positions[0], obstacle_positions[1], obstacle_positions[2], 
-               color='gray', alpha=0.3, marker='s', label='障碍物')
-    
+               color='gray', alpha=0.3, marker='s', label='障碍物')   
     # 绘制起点和终点
     ax.scatter(start_xyz[0], start_xyz[1], start_xyz[2], color='blue', s=100, label='起点')
     ax.scatter(target_xyz[0], target_xyz[1], target_xyz[2], color='red', s=100, label='终点')
@@ -169,46 +129,8 @@ def visualize_3d_path(start_xyz, target_xyz, path, space_map):
     ax.set_xlim(0, MAX_X)
     ax.set_ylim(0, MAX_Y)
     ax.set_zlim(0, MAX_Z)
-    
     # 添加图例
     ax.legend()
-    
-    plt.tight_layout()
-    plt.show()
-
-def visualize_3d_path(start_xyz, target_xyz, path, space_map):
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # 绘制障碍物
-    obstacle_positions = np.where(space_map == 0)
-    ax.scatter(obstacle_positions[0], obstacle_positions[1], obstacle_positions[2], 
-               color='gray', alpha=0.3, marker='s', label='障碍物')
-    
-    # 绘制起点和终点
-    ax.scatter(start_xyz[0], start_xyz[1], start_xyz[2], color='blue', s=100, label='起点')
-    ax.scatter(target_xyz[0], target_xyz[1], target_xyz[2], color='red', s=100, label='终点')
-    
-    # 绘制路径
-    if path:
-        path_array = np.array(path)
-        ax.plot(path_array[:, 0], path_array[:, 1], path_array[:, 2], 'g-', linewidth=2, label='路径')
-        ax.scatter(path_array[:, 0], path_array[:, 1], path_array[:, 2], color='yellow', s=20)
-    
-    # 设置坐标轴标签和标题
-    ax.set_xlabel('X轴')
-    ax.set_ylabel('Y轴')
-    ax.set_zlabel('Z轴')
-    ax.set_title('三维A*路径规划结果')
-    
-    # 设置坐标轴范围
-    ax.set_xlim(0, MAX_X)
-    ax.set_ylim(0, MAX_Y)
-    ax.set_zlim(0, MAX_Z)
-    
-    # 添加图例
-    ax.legend()
-    
     plt.tight_layout()
     plt.show()
 
@@ -346,58 +268,11 @@ def get_random_points(space_map, min_dist=40):
             dist = np.linalg.norm(np.array(s) - np.array(t))
             if dist >= min_dist and abs(s[2]-t[2])>=4:
                 return s, t
+def get_paths_total_length(path):#获得一段path的总长度
 
-# --- 4. 自动化基准测试函数 ---
-def run_benchmark(num_tests=30,save_root='.\\results\\'):
-    print(f"开始性能测试，总次数: {num_tests}...")
-    original_times = []
-    optimized_times = []
-    speedups=[]
-    success_count = 0
+    return sum([distanceFcn(path[i], path[i+1]) for i in range(len(path)-1)])
 
-    for i in range(num_tests):
-        os.makedirs(save_root+f"{i+1}_out",exist_ok=True)
-        space_map = create_3d_obstacles()
-        start_pt, target_pt = get_random_points(space_map, min_dist=25)
-        print(f"found_pt: {start_pt}, target_pt: {target_pt}")
-        
-        # 测试优化版
-        t0 = time.time()
-        found_opt,path1 = astar_search_3d_optimized(start_pt, target_pt, space_map)
-        visualize_3d_path_save(start_pt,target_pt,path1,space_map,save_path=save_root+f"{i+1}_out\\{i+1}_acc.png")
-        t_opt = time.time() - t0
-        
-        # 测试原始版
-        t1 = time.time()
-        found_orig,path2 = astar_search_3d(start_pt, target_pt, space_map)
-        visualize_3d_path_save(start_pt,target_pt,path1,space_map,save_path=save_root+f'{i+1}_out\\{i+1}_origin.png')
 
-        t_orig = time.time() - t1
-        
-        # 只有当路径确实存在时，对比才有意义（虽然算法失败耗时也值得参考）
-        if found_opt and found_orig:
-            success_count += 1
-            original_times.append(t_orig)
-            optimized_times.append(t_opt)
-            speedups.append(t_orig/t_opt)
-            print(f"测试 {i+1:02d}: 原始 {t_orig:.4f}s | 优化 {t_opt:.4f}s | 加速 {t_orig/t_opt:.2f}x")
-        else:
-            print(f"测试 {i+1:02d}: 路径不可达，跳过数据统计")
-
-    if success_count > 0:
-        avg_orig = np.mean(original_times)
-        avg_opt = np.mean(optimized_times)
-
-        print("\n" + "="*30)
-        print(f"测试完成！成功找到路径次数: {success_count}")
-        print(f"原始算法平均耗时: {avg_orig:.4f} s")
-        print(f"优化算法平均耗时: {avg_opt:.4f} s")
-        print(f"平均加速比: {avg_orig/avg_opt:.2f} 倍")
-        print("="*30)
-        plot_benchmark_results(original_times, optimized_times, speedups)
-
-    else:
-        print("所有测试均未找到有效路径，请调整障碍物密度或地图大小。")
 def plot_benchmark_results(original_times, optimized_times, speedups):
     fig = plt.figure(figsize=(15, 5))
     
@@ -405,8 +280,8 @@ def plot_benchmark_results(original_times, optimized_times, speedups):
     ax1 = fig.add_subplot(131)
     indices = np.arange(len(original_times))
     width = 0.35
-    ax1.bar(indices - width/2, original_times, width, label='原始算法', color='salmon')
-    ax1.bar(indices + width/2, optimized_times, width, label='优化算法', color='skyblue')
+    ax1.bar(indices - width/2, original_times, width, label='RRT算法', color='salmon')
+    ax1.bar(indices + width/2, optimized_times, width, label='优化A*算法', color='skyblue')
     ax1.set_xlabel('测试序号')
     ax1.set_ylabel('耗时 (秒)')
     ax1.set_title('各次测试耗时对比')
@@ -416,7 +291,7 @@ def plot_benchmark_results(original_times, optimized_times, speedups):
     # 2. 加速比折线图
     ax2 = fig.add_subplot(132)
     ax2.plot(indices, speedups, marker='o', linestyle='-', color='green')
-    ax2.axhline(y=np.mean(speedups), color='red', linestyle='--', label=f'平均: {np.mean(speedups):.1f}x')
+    #ax2.axhline(y=np.mean(speedups), color='red', linestyle='--', label=f'平均: {np.mean(speedups):.1f}x')
     ax2.set_xlabel('测试序号')
     ax2.set_ylabel('加速倍数')
     ax2.set_title('加速效率分布')
@@ -434,6 +309,8 @@ def plot_benchmark_results(original_times, optimized_times, speedups):
     plt.show()
     plt.savefig('benchmark_results.png')
     plt.close()
+
+
 # 主函数
 def main():
     print("正在创建三维空间环境...")
@@ -458,11 +335,13 @@ def main():
         print("正在计算路径...")
         start_time1=time.time()
         found, path = astar_search_3d_optimized(start_point, target_point, space_map)
+        #path=b_spline_optimization(path)#贪心路径修剪
+
         end_time1=time.time()
         print("It took %.2f seconds to find the path.(acc version)" % (end_time1 - start_time1))
 
         start_time2=time.time()
-        found1,path1=astar_search_3d(start_point, target_point, space_map)
+        found1,path1=astar_search_3d_optimized_w(start_point, target_point, space_map)
         end_time2=time.time()
         print("It took %.2f seconds to find the path.(original version)" % (end_time2 - start_time2))
         
@@ -477,10 +356,3 @@ def main():
             print("未找到路径！")
     else:
         print("未完成点选择，程序退出。")
-
-# 运行主函数
-if __name__ == "__main__":
-    #main()
-    save_root='.\\results\\'
-    os.makedirs(save_root, exist_ok=True)
-    run_benchmark(save_root=save_root)
