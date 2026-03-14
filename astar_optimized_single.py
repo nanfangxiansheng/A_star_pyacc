@@ -7,14 +7,12 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backend_bases import MouseButton
 import random
 import astar
-def astar_search_3d_optimized(start_xyz, target_xyz, space_map):
+def astar_search_3d_optimized(start_xyz, target_xyz, space_map):#单次优化版本指的是没有使用加权启发函数的astar搜索算法
     # 转换为元组提高处理速度和作为字典键
     start = tuple(start_xyz)
-    target = tuple(target_xyz)
-    
+    target = tuple(target_xyz)  
     # 地图边界
     MAX_X, MAX_Y, MAX_Z = space_map.shape
-
     # 预计算26个方向的偏移量和距离，以存储空间来节省计算花费的时间
     neighbors_offsets = []
     for dx in [-1, 0, 1]:
@@ -29,14 +27,11 @@ def astar_search_3d_optimized(start_xyz, target_xyz, space_map):
     # 优先队列 [f_score, g_score, (x, y, z)]
     # heapq 会根据第一个元素 f_score 自动排序
     start_hn = np.linalg.norm(np.array(start) - np.array(target))
-    openset = [(start_hn, 0, start)]
-    
+    openset = [(start_hn, 0, start)]    
     # 记录每个点是从哪个点来的 (用于回溯)
-    came_from = {}
-    
+    came_from = {}   
     # 记录从起点到当前点的实际代价 g
-    g_score = {start: 0}
-    
+    g_score = {start: 0}  
     # 记录是否已访问过 (Closed Set)
     closed_set = set()
     foundpath = 0

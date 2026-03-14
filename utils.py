@@ -26,24 +26,57 @@ def create_3d_obstacles():
     # 初始化空间，1表示可通行，0表示障碍物
     space = np.ones((MAX_X, MAX_Y, MAX_Z))
     
-    # 创建一些随机障碍物
-    num_obstacles = 15
+    # # 创建一些随机障碍物
+    # num_obstacles = 15
+    # for _ in range(num_obstacles):
+    #     # 随机生成障碍物中心点
+    #     center_x = random.randint(5, MAX_X-5)
+    #     center_y = random.randint(5, MAX_Y-5)
+    #     center_z = random.randint(5, MAX_Z-5)       
+    #     # 随机生成障碍物大小
+    #     size_x = random.randint(3, 10)
+    #     size_y = random.randint(3, 10)
+    #     size_z = random.randint(3, 10)       
+    #     # 创建立方体障碍物
+    #     for x in range(max(0, center_x-size_x//2), min(MAX_X, center_x+size_x//2)):
+    #         for y in range(max(0, center_y-size_y//2), min(MAX_Y, center_y+size_y//2)):
+    #             for z in range(max(0, center_z-size_z//2), min(MAX_Z, center_z+size_z//2)):
+    #                 space[x, y, z] = 0
+    for x in range(20,30):
+        for y in range(20,30):
+            for z in range(0,MAX_Z):
+                space[x,y,z]=0
+    for x in range(10,15):
+        for y in range(10,20):
+            for z in range(0,MAX_Z//2):
+                space[x,y,z]=0
+
+    for x in range(35,40):
+        for y in range(40,45):
+            for z in range(0,int(MAX_Z*0.7)):
+                space[x,y,z]=0
+    for x in range(40,50):
+        for y in range(5,20):
+            for z in range(0,MAX_Z//2):
+                space[x,y,z]=0
+    num_obstacles = 5
     for _ in range(num_obstacles):
         # 随机生成障碍物中心点
         center_x = random.randint(5, MAX_X-5)
         center_y = random.randint(5, MAX_Y-5)
-        center_z = random.randint(5, MAX_Z-5)
-        
+        center_z = random.randint(5, MAX_Z-5)       
         # 随机生成障碍物大小
-        size_x = random.randint(3, 10)
-        size_y = random.randint(3, 10)
-        size_z = random.randint(3, 10)
-        
+        size_x = random.randint(3, 8)
+        size_y = random.randint(3, 8)
+        size_z = random.randint(3, 8)       
         # 创建立方体障碍物
         for x in range(max(0, center_x-size_x//2), min(MAX_X, center_x+size_x//2)):
             for y in range(max(0, center_y-size_y//2), min(MAX_Y, center_y+size_y//2)):
                 for z in range(max(0, center_z-size_z//2), min(MAX_Z, center_z+size_z//2)):
                     space[x, y, z] = 0
+
+
+
     
     return space
 
@@ -261,12 +294,17 @@ def select_points_3d(space_map):
 def get_random_points(space_map, min_dist=40):
     """随机选择不在障碍物上且距离大于阈值的两点"""
     while True:
-        s = [random.randint(0, MAX_X-1) for _ in range(3)]
-        t = [random.randint(0, MAX_X-1) for _ in range(3)]
+        half_val=MAX_X//2
+        quarter_val=MAX_X//8
+        s = [random.randint(MAX_X-1-quarter_val, MAX_X-1) for _ in range(3)]
+        t = [random.randint(0, quarter_val) for _ in range(3)]
         
         if space_map[s[0], s[1], s[2]] == 1 and space_map[t[0], t[1], t[2]] == 1:
             dist = np.linalg.norm(np.array(s) - np.array(t))
-            if dist >= min_dist and abs(s[2]-t[2])>=4:
+            print("start",s)
+            print("target",t)
+            print("distance",dist)
+            if dist >= min_dist and abs(s[2]-t[2])>=6  :
                 return s, t
 def get_paths_total_length(path):#获得一段path的总长度
 
